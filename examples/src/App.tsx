@@ -45,7 +45,6 @@ function App() {
         hash={txHash}
         isMainnet={isMainnet}
         url={rpc}
-        onCellClick={setTxHash}
       />
     </div>
   );

@@ -3,7 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
-  "workspaces": ["../"],
+  "workspaces": [
+    "../"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
@@ -12,6 +14,8 @@
   },
   "dependencies": {
     "@ckb-lumos/lumos": "0.22.0-next.1",
+    "@types/cytoscape": "^3.21.0",
+    "cytoscape": "^3.28.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },

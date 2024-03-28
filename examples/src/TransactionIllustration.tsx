@@ -1,21 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import {
-  CellInfo,
-  createTransactionIllustration,
-  TransactionIllustrationConfig,
-} from "../../src";
-import { helpers, RPC } from "@ckb-lumos/lumos";
-
-type ConfigData = TransactionIllustrationConfig["data"];
+import { config, Input, Output, RPC } from "@ckb-lumos/lumos";
+import CytoscapeGraph, { TxData, truncateMiddle } from './cytoscape-graph'
 
 export const TransactionIllustration: React.FC<{
   hash: string;
   isMainnet?: boolean;
   url?: string;
-  onCellClick?: (nextTxHash: string) => void;
-}> = ({ hash: txHash, isMainnet, url: inputUrl, onCellClick }) => {
-  const [txData, setTxData] = useState<ConfigData>();
-  const domRef = useRef<HTMLDivElement | null>(null);
+}> = ({ hash: txHash, isMainnet, url: inputUrl }) => {
+  const [txData, setTxData] = useState<TxData>();
 
   const url = useMemo(() => {
     if (inputUrl) return inputUrl;
@@ -24,28 +16,45 @@ export const TransactionIllustration: React.FC<{
   }, [inputUrl, isMainnet]);
 
   useEffect(() => {
+    if (isMainnet) {
+      config.initializeConfig(config.MAINNET)
+    } else {
+      config.initializeConfig(config.TESTNET)
+    }
+  }, [isMainnet])
+
+  useEffect(() => {
     getTxData({ txHash, url }).then(setTxData);
   }, [txHash, url]);
 
-  useEffect(() => {
-    if (!txData) {
-      return;
-    }
-    domRef.current?.replaceChildren(
-      createTransactionIllustration({
-        data: txData,
-        renderCellInfo: (cell) => {
-          return truncateMiddle(helpers.encodeToAddress(cell.lock), 6, 4);
-        },
-        renderTransactionInfo: (txHash) => {
-          return truncateMiddle(txHash);
-        },
-      }),
-    );
-  }, [txData, isMainnet, onCellClick]);
+  const ref = useRef<HTMLDivElement | null>(null)
+  const [inputPositions, setInputsPositions] = useState<(cytoscape.BoundingBox12 & cytoscape.BoundingBoxWH)[]>([])
 
-  if (!txData) return null;
-  return <div style={{ width: "100%", height: "100%" }} ref={domRef}></div>;
+  useEffect(() => {
+    if (ref.current && txData) {
+      const cy = CytoscapeGraph(ref.current, txData)
+      const inputsBox = txData.inputs.map(v => cy.getElementById(`${v.previousOutput.txHash}_${v.previousOutput.index}`).renderedBoundingBox())
+      setInputsPositions(inputsBox)
+    }
+  }, [ref, txData, setInputsPositions])
+
+  return (
+    <div style={{ position: 'relative' }}>
+      <div ref={ref} style={{ width: '100%', height: 400 }} />
+      {
+        txData?.inputs.map((v, idx) => (
+          <div
+            key={`${v.previousOutput.txHash}-${v.previousOutput.index}`}
+            style={{ lineHeight: `${inputPositions[idx]?.h}px`, position: 'absolute', left: inputPositions[idx]?.x1 + 4, top: inputPositions[idx]?.y1 }}
+          >
+            <span style={{ color: '#00CC9B'}}>{truncateMiddle(v.previousOutput.txHash)}-{+v.previousOutput.index}</span>
+            &nbsp;&nbsp;|&nbsp;&nbsp;
+            <span>{BigInt(v.capacity).toString()}</span>
+          </div>
+        ))
+      }
+    </div>
+  )
 };
 
 async function getTxData({
@@ -54,16 +63,16 @@ async function getTxData({
 }: {
   url: string;
   txHash: string;
-}): Promise<ConfigData> {
+}): Promise<TxData> {
   const rpc = new RPC(url);
   const tx = await rpc.getTransaction(txHash);
 
-  const outputs = tx.transaction.outputs.map<CellInfo>((output, index) => ({
+  const outputs = tx.transaction.outputs.map<Output>((output, index) => ({
     ...output,
     data: tx.transaction.outputsData[index] || "0x",
   }));
 
-  const inputsPromise = tx.transaction.inputs.map<Promise<CellInfo>>(
+  const inputsPromise = tx.transaction.inputs.map<Promise<Input & Output>>(
     async (input) => {
       const previousTxHash = input.previousOutput.txHash;
       const previousTx = await rpc.getTransaction(previousTxHash);
@@ -72,15 +81,11 @@ async function getTxData({
       const output = previousTx.transaction.outputs[index];
       const data = previousTx.transaction.outputsData[index] || "0x";
 
-      return { ...output, data };
+      return { ...output, data, ...input };
     },
   );
 
   const inputs = await Promise.all(inputsPromise);
 
   return { inputs, outputs, txHash };
-}
-
-function truncateMiddle(str: string, start = 6, end = start) {
-  return `${str.slice(0, start)}...${str.slice(-end)}`;
 }
